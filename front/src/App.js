@@ -7,6 +7,7 @@ import 'leaflet/dist/leaflet.css'
 import 'leaflet-draw'
 
 const graph = require('./graph')
+const maps = require('./maps')
 
 class App extends Component {
   constructor(props) {
@@ -33,18 +34,28 @@ class App extends Component {
     }
   }
 
+
+  componentWillMount() {
+    const urlParams = new URLSearchParams(window.location.search)
+    this.myParam = urlParams.get('edit')
+  }
+
   componentDidMount() {
 
-    let sw = L.latLng(0, 255),
-      ne = L.latLng(-255, 0);
-    let bounds = L.latLngBounds(sw, ne)
+    // let sw = L.latLng(0, 500),
+    //   ne = L.latLng(-500, 0);
+    // let bounds = L.latLngBounds(sw, ne)
 
     this.map = L.map('map', {
       minZoom: 1,
       maxZoom: 4,
-      center: bounds.getCenter(),
+      center: [-255, 255]/*bounds.getCenter()*/,
       zoom: 1,
       crs: L.CRS.Simple
+    })
+
+    maps.map(m => {
+      this.addMap(`/img/maps/${m.path}.jpg`, m.x, m.y)
     })
 
     //this.map.setMaxBounds(bounds)
@@ -54,7 +65,7 @@ class App extends Component {
     const poten = 8
 
     this.layer = L.geoJSON(null, {
-      pointToLayer: function (feature, latlng) {
+      pointToLayer: (feature, latlng) => {
         latlng.lat = latlng.lat * -poten
         latlng.lng = latlng.lng * poten
 
@@ -63,25 +74,42 @@ class App extends Component {
           iconSize: [graph[feature.properties.graph].w, graph[feature.properties.graph].h]
         })
         return L.marker(latlng, { icon: ratIcon }).bindPopup('<strong>Árbol sangrado</strong><br>Creado por la sangre derramada de los elfos en las guerras medias.')
+      },
+      style: (feature) => {
+        switch (feature.properties.faction) {
+            case 'Dark Legion': return {color: "#ff0000"};
+            case 'Real Army':   return {color: "#0000ff"};
+        }
+      },
+      onEachFeature: (feature, layer) => {
+        // does this feature have a property named popupContent?
+        if (feature.properties && feature.properties.faction && feature.properties.player) {
+            layer.bindPopup(
+              'Faction: ' + feature.properties.faction +
+              '<br>Player: ' + feature.properties.player
+              );
+        }
       }
     }).addTo(this.map)
 
-
-    this.addMap('/img/maps/ullathorpe.jpg')
-    this.addMap('/img/maps/banderbill-no.jpg', 1, 0)
+    this.refreshData(
+    {"type":"FeatureCollection","features":[
+      {"type":"Feature","properties":{"faction": "Real Army", "player": "Frezon"},"geometry":{"type":"Polygon","coordinates":[[[303.5625,-116.625],[307.5625,-115.625],[307.5625,-112],[310.25,-112.0625],[310.375,-114.6875],[313.625,-113.8125],[323.4375,-116.5625],[323.75,-130.0625],[322.9375,-129.875],[323.25,-138.1875],[304,-138.3125],[304.125,-129.875],[303.375,-130.4375],[303.5625,-116.625]]]}},
+      {"type":"Feature","properties":{"faction": "Dark Legion", "player": "Pampiro"},"geometry":{"type":"Polygon","coordinates":[[[326.875,-97.375],[327,-89.125],[326.1875,-89.25],[326.625,-75.625],[330.5,-74.6875],[330.625,-71.25],[333.25,-71.125],[333.375,-73.8125],[336.4375,-72.8125],[346.5625,-75.625],[346.875,-88.9375],[346.1875,-88.8125],[346.0625,-97.3125],[326.875,-97.375]]]}}]})
   }
 
-  addMap(url, X=0, Y=0) {
+  addMap(url, X = 0, Y = 0) {
     // dimensions of the image
     let w = 2048,
-        h = 2048
+      h = 2048
 
-    X = X + 2048 * X
-    Y = Y + 2048 * Y
+    X = w * X
+    Y = h * Y
 
     // calculate the edges of the image, in coordinate space
-    let southWest = this.map.unproject([X, h + X], this.map.getMaxZoom() - 1)
-    let northEast = this.map.unproject([w + Y, Y], this.map.getMaxZoom() - 1)
+    let southWest = this.map.unproject([X, h + Y], this.map.getMaxZoom() - 1)
+    let northEast = this.map.unproject([w + X, Y], this.map.getMaxZoom() - 1)
+
     let bounds = new L.LatLngBounds(southWest, northEast)
 
     L.imageOverlay(window.location.origin + url, bounds).addTo(this.map)
@@ -92,40 +120,40 @@ class App extends Component {
   }
 
   addDrow() {
+    if (this.myParam === 'true') {
 
-    const urlParams = new URLSearchParams(window.location.search);
-    const myParam = urlParams.get('edit')
-    if (myParam === 'true') {let featureGroup = L.featureGroup().addTo(this.map);
+      let featureGroup = L.featureGroup().addTo(this.map)
 
-    new L.Control.Draw({
-      edit: {
-        featureGroup: featureGroup
+      new L.Control.Draw({
+        edit: {
+          featureGroup: featureGroup
+        }
+      }).addTo(this.map);
+
+      this.map.on('draw:created', function (e) {
+
+        // Each time a feaute is created, it's added to the over arching feature group
+        featureGroup.addLayer(e.layer);
+      });
+
+
+      // on click, clear all layers
+      document.getElementById('delete').onclick = function (e) {
+        featureGroup.clearLayers();
       }
-    }).addTo(this.map);
 
-    this.map.on('draw:created', function (e) {
+      document.getElementById('export').onclick = function (e) {
+        // Extract GeoJson from featureGroup
+        let data = featureGroup.toGeoJSON();
 
-      // Each time a feaute is created, it's added to the over arching feature group
-      featureGroup.addLayer(e.layer);
-    });
+        // Stringify the GeoJson
+        let convertedData = 'text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(data));
 
-
-    // on click, clear all layers
-    document.getElementById('delete').onclick = function (e) {
-      featureGroup.clearLayers();
+        // Create export
+        document.getElementById('export').setAttribute('href', 'data:' + convertedData);
+        document.getElementById('export').setAttribute('download', 'data.geojson');
+      }
     }
-
-    document.getElementById('export').onclick = function (e) {
-      // Extract GeoJson from featureGroup
-      let data = featureGroup.toGeoJSON();
-
-      // Stringify the GeoJson
-      let convertedData = 'text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(data));
-
-      // Create export
-      document.getElementById('export').setAttribute('href', 'data:' + convertedData);
-      document.getElementById('export').setAttribute('download', 'data.geojson');
-    }}
   }
 
   refreshData(data) {
@@ -146,8 +174,14 @@ class App extends Component {
       <div className="App">
         <div id='ll'></div>
         <div id='map' className='map' />
-        <div id='delete'>Eliminar</div>
-        <a href='#' id='export'>Guardar</a>
+
+        {this.myParam === 'true' &&
+          <span>
+            <div id='delete'>Eliminar</div>
+            <a href='#' id='export'>Guardar</a>
+          </span>
+        }
+
         <style jsx='true'>{`
         html, body {
           height: 100%;
